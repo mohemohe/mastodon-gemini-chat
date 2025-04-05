@@ -62,7 +62,7 @@ function connect() {
   
   try {
     // ユーザーストリームに接続
-    stream = client.userStream();
+    stream = client.userSocket();
     
     // 通知イベントのリスナー
     stream.on('notification', async (notification) => {
