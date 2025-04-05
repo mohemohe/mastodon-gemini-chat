@@ -6,6 +6,8 @@ require('dotenv').config();
 const MASTODON_SERVER = process.env.MASTODON_SERVER;
 const MASTODON_ACCESS_TOKEN = process.env.MASTODON_ACCESS_TOKEN;
 
+const domain = MASTODON_SERVER.split('://')[1];
+
 // Megalodonクライアントの初期化
 const client = megalodon.default(
   'mastodon',
@@ -54,11 +56,17 @@ function cleanupConversationContexts() {
 // 定期的にクリーンアップを実行（1時間ごと）
 setInterval(cleanupConversationContexts, 60 * 60 * 1000);
 
+let me_acct = "";
+
 /**
  * ストリーミングに接続する
  */
 function connect() {
   console.log('Connecting to Mastodon streaming API...');
+
+  client.verifyAccountCredentials().then(response => {
+    me_acct = response.data.acct;
+  });
   
   try {
     // ユーザーストリームに接続
@@ -135,7 +143,7 @@ async function handleMention(notification) {
   const accountId = status.account.id;
   
   // "!"で始まるメンションはスキップ
-  if (content.includes(`@${status.account.acct} !`)) {
+  if (content.includes(`@${me_acct} !`) || content.includes(`@${me_acct}@${domain} !`)) {
     console.log('Skipping mention with ! mark');
     return;
   }
@@ -163,7 +171,7 @@ async function handleMention(notification) {
   const response = await sendMessage(conversationId, content);
   
   // Mastodonに返信を投稿（元の投稿のvisibilityを引き継ぐ）
-  await postReply(status.id, response, status.visibility);
+  await postReply(status.id, `@${status.account.acct} ${response}`, status.visibility);
 }
 
 /**
