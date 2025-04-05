@@ -1,0 +1,24 @@
+{
+  "name": "mastodon-gemini-chat",
+  "version": "1.0.0",
+  "description": "Mastodon bot that integrates with Gemini 2.0 Flash API",
+  "main": "index.js",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "shell": "node src/shell.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.2.1",
+    "dotenv": "^16.3.1",
+    "megalodon": "^9.1.1",
+    "node-fetch": "^2.7.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+} 
