@@ -1,8 +1,10 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // Gemini API初期化
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
 const MODEL_NAMES = (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim());
@@ -11,8 +13,27 @@ let currentModelIndex = 0;
 // エラーメッセージを環境変数から取得
 const ERROR_MESSAGE = process.env.ERROR_MESSAGE || '残念だが、その質問には答えられんな';
 
-// システムプロンプトを環境変数から取得
-const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || '';
+/**
+ * システムプロンプトをファイルから読み込む
+ * @returns {string} システムプロンプト
+ */
+function loadSystemPrompt() {
+  try {
+    // システムプロンプトのパスを環境変数から取得
+    const systemPromptPath = process.env.SYSTEM_PROMPT_PATH;
+    if (systemPromptPath && fs.existsSync(systemPromptPath)) {
+      return fs.readFileSync(systemPromptPath, 'utf8').trim();
+    }
+  } catch (error) {
+    console.error('Error loading system prompt from file:', error);
+  }
+  
+  // ファイルが存在しない、または読み込みに失敗した場合は環境変数から取得
+  return process.env.SYSTEM_PROMPT || '';
+}
+
+// システムプロンプトを読み込む
+const SYSTEM_PROMPT = loadSystemPrompt();
 
 // 現在時刻をフォーマットして取得
 const now = new Date();
