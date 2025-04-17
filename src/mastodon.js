@@ -1,5 +1,6 @@
 const megalodon = require('megalodon');
 const { sendMessage } = require('./gemini');
+const cheerio = require('cheerio');
 require('dotenv').config();
 
 // 環境変数から設定を読み込む
@@ -136,32 +137,31 @@ function reconnect() {
 /**
  * リプライツリーから会話履歴を構築する
  * @param {string} statusId - 現在の投稿ID
- * @param {string} rootStatusId - リプライツリーのルートID
- * @returns {Promise<Array<{role: string, content: string}>>} 会話履歴の配列
+ * @returns {Promise<Array<{role: string, parts: string}>>} 会話履歴の配列
  */
-async function buildConversationHistory(statusId, rootStatusId) {
+async function buildConversationHistory(statusId) {
   const history = [];
   let currentStatusId = statusId;
   
   try {
     // リプライツリーのコンテキストを取得
     const thread = await client.getStatusContext(statusId);
-    
+
     // 先祖の投稿を時系列順に処理
     if (thread.data.ancestors) {
-      for (const ancestor of thread.data.ancestors) {
-        // ルート投稿に到達したら終了
-        if (ancestor.id === rootStatusId) {
-          break;
-        }
-        
+      // 作成日時順にソート
+      const sortedAncestors = [...thread.data.ancestors].sort((a, b) => {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+
+      for (const ancestor of sortedAncestors) {
         const content = stripHtml(ancestor.content);
         // 自分自身の投稿かどうかを判定
         const isBot = ancestor.account.acct === me_acct;
         
         history.push({
           role: isBot ? 'model' : 'user',
-          content: content
+          parts: content
         });
       }
     }
@@ -173,7 +173,7 @@ async function buildConversationHistory(statusId, rootStatusId) {
     
     history.push({
       role: isCurrentBot ? 'model' : 'user',
-      content: currentContent
+      parts: currentContent
     });
     
     return history;
@@ -205,7 +205,12 @@ async function handleMention(notification) {
       // リプライツリーの最初の投稿を取得
       const thread = await client.getStatusContext(status.id);
       if (thread.data.ancestors && thread.data.ancestors.length > 0) {
-        rootStatusId = thread.data.ancestors[0].id;
+        // 作成日時順にソート
+        const sortedAncestors = [...thread.data.ancestors].sort((a, b) => {
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        });
+        // 最も古い投稿（先頭）をルートとして使用
+        rootStatusId = sortedAncestors[0].id;
       }
     } catch (error) {
       console.error('Error fetching status context:', error);
@@ -216,12 +221,18 @@ async function handleMention(notification) {
   let conversationContext = conversationContexts.get(accountId);
   let conversationId;
 
+  console.log("conversationContext:", conversationContext);
+  console.log("conversationContext.rootStatusId !== rootStatusId:", conversationContext?.rootStatusId !== rootStatusId);
+
+  let isNewConversation = false;
   if (!conversationContext || conversationContext.rootStatusId !== rootStatusId) {
+    isNewConversation = true;
+    
     // 新規会話またはルートIDが変更された場合
     conversationId = `${accountId}-${rootStatusId}`;
     
     // リプライツリーから会話履歴を構築
-    const history = await buildConversationHistory(status.id, rootStatusId);
+    const history = await buildConversationHistory(status.id);
     
     conversationContexts.set(accountId, {
       id: conversationId,
@@ -239,7 +250,7 @@ async function handleMention(notification) {
   }
   
   // Geminiにメッセージを送信
-  const response = await sendMessage(conversationId, content, conversationContexts.get(accountId).history);
+  const response = await sendMessage(conversationId, content, isNewConversation ? conversationContexts.get(accountId).history : []);
   
   // Mastodonに返信を投稿（元の投稿のvisibilityを引き継ぐ）
   await postReply(status.id, `@${status.account.acct} ${response}`, status.visibility);
@@ -251,13 +262,16 @@ async function handleMention(notification) {
  * @returns {string} プレーンテキスト
  */
 function stripHtml(html) {
-  return html.replace(/<[^>]*>/g, '')
-    .replace(/&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&gt;/g, '>')
-    .replace(/&lt;/g, '<')
-    .replace(/&amp;/g, '&')
+  console.log("html:", html);
+  html = html.replace(/<br\s*\/?>/gi, '###BR###');
+  const $ = cheerio.load(html);
+  const strippedHtml = $('body')
+    .text()
+    .replace(/\s+/g, ' ')
+    .replace(/###BR###/gi, '\n')
     .trim();
+  console.log("strippedHtml:", strippedHtml);
+  return strippedHtml;
 }
 
 /**

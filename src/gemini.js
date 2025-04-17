@@ -186,6 +186,9 @@ function filterResponse(response) {
   if (response.includes(SYSTEM_PROMPT)) {
     return ERROR_MESSAGE;
   }
+  if (response.includes(SYSTEM_PROMPT_WITH_TIME)) {
+    return ERROR_MESSAGE;
+  }
   
   return response;
 }
@@ -205,7 +208,6 @@ async function sendMessage(conversationId, message, history = []) {
     }
     
     console.log("conversationId:", conversationId);
-    
     // モデルの使用時刻を更新し、必要に応じてモデルを切り替える
     const modelSwitched = updateModelUsage();
     
@@ -223,7 +225,7 @@ async function sendMessage(conversationId, message, history = []) {
       if (SYSTEM_PROMPT) {
         chatOptions.history.unshift({ role: 'model', parts: SYSTEM_PROMPT_WITH_TIME });
       }
-
+      console.log("chatOptions.history:", chatOptions.history);
       conversations[conversationId] = models[currentModelIndex].startChat(chatOptions);
     } else {
       initConversation(conversationId);
