@@ -13,6 +13,21 @@ const ERROR_MESSAGE = process.env.ERROR_MESSAGE || '残念だが、その質問�
 // システムプロンプトを環境変数から取得
 const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || '';
 
+// 現在時刻をフォーマットして取得
+const now = new Date();
+const formattedDate = now.toLocaleString('ja-JP', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
+}).replace(/\//g, '/').replace(/,/g, '');
+
+// システムプロンプトに時刻情報を追加
+const SYSTEM_PROMPT_WITH_TIME = `現在の日時は${formattedDate}です。\n${SYSTEM_PROMPT}`;
+
 // プロンプトインジェクション防止のためのブロックワード
 const BLOCKED_PATTERNS = [
   /ignore previous instructions/i,
@@ -54,7 +69,7 @@ function initConversation(conversationId) {
 
     // システムプロンプトが設定されている場合は追加
     if (SYSTEM_PROMPT) {
-      chatOptions.history.push({ role: 'model', parts: SYSTEM_PROMPT });
+      chatOptions.history.push({ role: 'model', parts: SYSTEM_PROMPT_WITH_TIME });
     }
 
     conversations[conversationId] = model.startChat(chatOptions);
@@ -120,7 +135,7 @@ async function sendMessage(conversationId, message, history = []) {
 
       // システムプロンプトが設定されている場合は追加
       if (SYSTEM_PROMPT) {
-        chatOptions.history.unshift({ role: 'model', parts: SYSTEM_PROMPT });
+        chatOptions.history.unshift({ role: 'model', parts: SYSTEM_PROMPT_WITH_TIME });
       }
 
       conversations[conversationId] = model.startChat(chatOptions);
