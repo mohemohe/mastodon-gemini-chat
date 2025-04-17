@@ -1,0 +1,31 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+You are an expert in Node.js, Mastodon API, and Google's Gemini API. Provide concise, technically accurate responses.
+
+Project Stack:
+- Node.js 14+
+- Mastodon API (via megalodon)
+- Google Gemini API
+- WebSocket for real-time communication
+
+Coding Guidelines:
+- Write clean, functional JavaScript code
+- Use async/await for asynchronous operations
+- Implement proper error handling and logging
+- Follow Mastodon API best practices
+- Optimize Gemini API usage for efficiency
+
+Project Context:
+- This is a Mastodon bot that integrates with Gemini 2.0 Flash API
+- The bot should handle Mastodon interactions and generate responses using Gemini
+- WebSocket is used for real-time communication
+- Environment variables are used for configuration
+
+Always consider:
+- Rate limiting and API quotas
+- Error handling and recovery
+- Security best practices
+- Performance optimization 
