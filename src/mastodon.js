@@ -134,6 +134,56 @@ function reconnect() {
 }
 
 /**
+ * リプライツリーから会話履歴を構築する
+ * @param {string} statusId - 現在の投稿ID
+ * @param {string} rootStatusId - リプライツリーのルートID
+ * @returns {Promise<Array<{role: string, content: string}>>} 会話履歴の配列
+ */
+async function buildConversationHistory(statusId, rootStatusId) {
+  const history = [];
+  let currentStatusId = statusId;
+  
+  try {
+    // リプライツリーのコンテキストを取得
+    const thread = await client.getStatusContext(statusId);
+    
+    // 先祖の投稿を時系列順に処理
+    if (thread.data.ancestors) {
+      for (const ancestor of thread.data.ancestors) {
+        // ルート投稿に到達したら終了
+        if (ancestor.id === rootStatusId) {
+          break;
+        }
+        
+        const content = stripHtml(ancestor.content);
+        // 自分自身の投稿かどうかを判定
+        const isBot = ancestor.account.acct === me_acct;
+        
+        history.push({
+          role: isBot ? 'model' : 'user',
+          content: content
+        });
+      }
+    }
+    
+    // 現在の投稿を追加
+    const currentStatus = await client.getStatus(currentStatusId);
+    const currentContent = stripHtml(currentStatus.data.content);
+    const isCurrentBot = currentStatus.data.account.acct === me_acct;
+    
+    history.push({
+      role: isCurrentBot ? 'model' : 'user',
+      content: currentContent
+    });
+    
+    return history;
+  } catch (error) {
+    console.error('Error building conversation history:', error);
+    return [];
+  }
+}
+
+/**
  * メンション通知を処理する
  * @param {Object} notification - 通知オブジェクト
  */
@@ -147,28 +197,49 @@ async function handleMention(notification) {
     console.log('Skipping mention with ! mark');
     return;
   }
-  
+
+  // リプライツリーのルートIDを取得
+  let rootStatusId = status.id;
+  if (status.in_reply_to_id) {
+    try {
+      // リプライツリーの最初の投稿を取得
+      const thread = await client.getStatusContext(status.id);
+      if (thread.data.ancestors && thread.data.ancestors.length > 0) {
+        rootStatusId = thread.data.ancestors[0].id;
+      }
+    } catch (error) {
+      console.error('Error fetching status context:', error);
+    }
+  }
+
   // 会話コンテキストを取得または作成
   let conversationContext = conversationContexts.get(accountId);
   let conversationId;
-  
-  if (!conversationContext) {
-    conversationId = `${accountId}-${Date.now()}`;
+
+  if (!conversationContext || conversationContext.rootStatusId !== rootStatusId) {
+    // 新規会話またはルートIDが変更された場合
+    conversationId = `${accountId}-${rootStatusId}`;
+    
+    // リプライツリーから会話履歴を構築
+    const history = await buildConversationHistory(status.id, rootStatusId);
+    
     conversationContexts.set(accountId, {
       id: conversationId,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      rootStatusId: rootStatusId,
+      history: history
     });
   } else {
     conversationId = conversationContext.id;
     // タイムスタンプを更新
     conversationContexts.set(accountId, {
-      id: conversationId,
+      ...conversationContext,
       timestamp: Date.now()
     });
   }
   
   // Geminiにメッセージを送信
-  const response = await sendMessage(conversationId, content);
+  const response = await sendMessage(conversationId, content, conversationContexts.get(accountId).history);
   
   // Mastodonに返信を投稿（元の投稿のvisibilityを引き継ぐ）
   await postReply(status.id, `@${status.account.acct} ${response}`, status.visibility);

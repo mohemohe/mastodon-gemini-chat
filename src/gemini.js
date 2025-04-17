@@ -96,9 +96,10 @@ function filterResponse(response) {
  * メッセージを送信し、応答を取得する
  * @param {string} conversationId - 会話ID
  * @param {string} message - ユーザーからのメッセージ
+ * @param {Array<{role: string, content: string}>} history - 会話履歴
  * @returns {Promise<string>} Geminiからの応答
  */
-async function sendMessage(conversationId, message) {
+async function sendMessage(conversationId, message, history = []) {
   try {
     // プロンプトインジェクション検出
     if (!isMessageSafe(message)) {
@@ -106,7 +107,27 @@ async function sendMessage(conversationId, message) {
     }
     
     console.log("conversationId:", conversationId);
-    initConversation(conversationId);
+    
+    // 会話履歴が存在する場合は、それを使用してチャットを初期化
+    if (history.length > 0) {
+      const chatOptions = {
+        history: history,
+        generationConfig: {
+          temperature: 1.8,
+          maxOutputTokens: 1024,
+        },
+      };
+
+      // システムプロンプトが設定されている場合は追加
+      if (SYSTEM_PROMPT) {
+        chatOptions.history.unshift({ role: 'model', parts: SYSTEM_PROMPT });
+      }
+
+      conversations[conversationId] = model.startChat(chatOptions);
+    } else {
+      initConversation(conversationId);
+    }
+    
     const chat = conversations[conversationId];
     
     const result = await chat.sendMessage(message);
