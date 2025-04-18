@@ -1,5 +1,6 @@
 const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
 const { HumanMessage, SystemMessage } = require('@langchain/core/messages');
+const { InMemoryChatMessageHistory } = require('@langchain/core/chat_history');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -87,11 +88,23 @@ const modelLastUsed = {
 console.log(`Available Gemini models: ${MODEL_NAMES.join(', ')}`);
 console.log(`Using Gemini model: ${MODEL_NAMES[currentModelIndex]}`);
 
-// 会話履歴を保存するオブジェクト
-const conversations = {};
+// 会話履歴を保存するためのInMemoryChatMessageHistoryインスタンスを保持するオブジェクト
+const messageHistories = {};
 
 // 会話履歴の最大長
 const MAX_CONTEXT_LENGTH = parseInt(process.env.MAX_CONTEXT_LENGTH || '10');
+
+/**
+ * 会話IDに対応するMessageHistoryを取得または作成する
+ * @param {string} conversationId - 会話ID
+ * @returns {InMemoryChatMessageHistory} MessageHistoryインスタンス
+ */
+function getMessageHistory(conversationId) {
+  if (!messageHistories[conversationId]) {
+    messageHistories[conversationId] = new InMemoryChatMessageHistory();
+  }
+  return messageHistories[conversationId];
+}
 
 /**
  * モデルの使用時刻を更新し、必要に応じてモデルを切り替える
@@ -128,6 +141,15 @@ function switchToNextModel() {
   console.log(`Switching to model: ${MODEL_NAMES[currentModelIndex]}`);
   return true;
 }
+
+/**
+ * 現在のモデル名を取得する
+ * @returns {string} 現在のモデル名
+ */
+function getCurrentModelName() {
+  return MODEL_NAMES[currentModelIndex];
+}
+
 
 /**
  * エラーがレート制限に関連するものかどうかを判定
@@ -205,33 +227,6 @@ function filterResponse(response) {
 }
 
 /**
- * LangChain用のメッセージ履歴を作成
- * @param {Array<{role: string, content: string}>} history - 会話履歴
- * @returns {Array} LangChain形式のメッセージ履歴
- */
-function createLangChainMessages(history) {
-  const messages = [];
-  
-  // システムプロンプトを追加
-  if (SYSTEM_PROMPT) {
-    const formattedDate = getFormattedDateTime();
-    messages.push(new SystemMessage(`現在の日時は${formattedDate}です。\n${SYSTEM_PROMPT}`));
-  }
-  
-  // 会話履歴を変換
-  console.log("history:", history);
-  for (const item of history) {
-    if (item.role === 'user') {
-      messages.push(new HumanMessage(item.content));
-    } else if (item.role === 'assistant') {
-      messages.push(new SystemMessage(item.content));
-    }
-  }
-  
-  return messages;
-}
-
-/**
  * メッセージを送信し、応答を取得する
  * @param {string} conversationId - 会話ID
  * @param {string} message - ユーザーからのメッセージ
@@ -250,11 +245,40 @@ async function sendMessage(conversationId, message, history = []) {
     // モデルの使用時刻を更新し、必要に応じてモデルを切り替える
     updateModelUsage();
     
-    // 会話履歴をLangChain形式に変換
-    let messages = createLangChainMessages(history);
+    // 会話履歴を取得または作成
+    const messageHistory = getMessageHistory(conversationId);
+    
+    // 既存の履歴がある場合は、それを使用
+    if (history.length > 0) {
+      // 履歴をクリアして新しく追加
+      await clearConversation(conversationId);
+      for (const item of history) {
+        if (item.role === 'user') {
+          await messageHistory.addUserMessage(item.content);
+        } else if (item.role === 'assistant' || item.role === 'model') {
+          await messageHistory.addAIMessage(item.content);
+        }
+      }
+    }
     
     // ユーザーメッセージを追加
-    messages.push(new HumanMessage(message));
+    if (message) {
+      await messageHistory.addUserMessage(message);
+    }
+    
+    // すべてのメッセージを取得
+    let messages = await messageHistory.getMessages();
+    
+    // システムメッセージを追加
+    if (SYSTEM_PROMPT) {
+      const formattedDate = getFormattedDateTime();
+      const systemMessage = new SystemMessage(`#基本的な情報
+現在の日時は${formattedDate}です。
+使用しているAIのモデルは${getCurrentModelName()}です。
+
+${SYSTEM_PROMPT}`);
+      messages = [systemMessage, ...messages];
+    }
     
     // 会話履歴が長すぎる場合は古い会話を削除（システムメッセージを保持）
     if (messages.length > MAX_CONTEXT_LENGTH + 1) { // +1 はシステムメッセージ分
@@ -262,22 +286,31 @@ async function sendMessage(conversationId, message, history = []) {
       messages = [systemMessage, ...messages.slice(-(MAX_CONTEXT_LENGTH))];
     }
     
+    console.log("messages:", JSON.parse(JSON.stringify(messages)));
+    
     // 現在のモデルインスタンスを取得
-    const modelName = MODEL_NAMES[currentModelIndex];
+    const modelName = getCurrentModelName();
     const model = getModelInstance(modelName);
     
     // モデルに問い合わせ
-    const response = await model.invoke(messages);
-    const text = response.text;
+    let text = "";
+    for (let i = 0; i < 3; i++) {
+      const response = await model.invoke(messages, {
+        timeout: 30000,
+      });
+      text = response.text;
+      if (!text) {
+        continue;
+      }
+      break;
+    }
+
     
     // レスポンスのフィルタリング
     const filteredText = filterResponse(text);
     
-    // 会話履歴を更新（このステップはLangChainを使う場合は不要かもしれませんが、
-    // 既存のコードとの互換性のために残しています）
-    if (!conversations[conversationId]) {
-      conversations[conversationId] = { history: [] };
-    }
+    // AIの応答を履歴に追加
+    await messageHistory.addAIMessage(filteredText);
     
     return filteredText;
   } catch (error) {
@@ -300,9 +333,9 @@ async function sendMessage(conversationId, message, history = []) {
  * 会話履歴をクリアする
  * @param {string} conversationId - 会話ID
  */
-function clearConversation(conversationId) {
-  if (conversations[conversationId]) {
-    delete conversations[conversationId];
+async function clearConversation(conversationId) {
+  if (messageHistories[conversationId]) {
+    await messageHistories[conversationId].clear();
   }
 }
 

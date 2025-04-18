@@ -250,7 +250,7 @@ async function handleMention(notification) {
   }
   
   // Geminiにメッセージを送信
-  const response = await sendMessage(conversationId, content, isNewConversation ? conversationContexts.get(accountId).history : []);
+  const response = await sendMessage(conversationId, isNewConversation ? "" : content, isNewConversation ? conversationContexts.get(accountId).history : []);
   
   // Mastodonに返信を投稿（元の投稿のvisibilityを引き継ぐ）
   await postReply(status.id, `@${status.account.acct} ${response}`, status.visibility);
