@@ -59,7 +59,9 @@ const BLOCKED_PATTERNS = [
   /act as/i,
   /pretend to be/i,
   /forget your previous instructions/i,
-  /disregard/i
+  /disregard/i,
+  /システム/i,
+  /プロンプト/i,
 ];
 
 // レート制限エラーを検出するためのパターン
@@ -229,11 +231,12 @@ function filterResponse(response) {
 /**
  * メッセージを送信し、応答を取得する
  * @param {string} conversationId - 会話ID
+ * @param {string} userName - ユーザー名
  * @param {string} message - ユーザーからのメッセージ
  * @param {Array<{role: string, content: string}>} history - 会話履歴
  * @returns {Promise<string>} Geminiからの応答
  */
-async function sendMessage(conversationId, message, history = []) {
+async function sendMessage(conversationId, userName, message, history = []) {
   try {
     // プロンプトインジェクション検出
     if (!isMessageSafe(message)) {
@@ -275,6 +278,7 @@ async function sendMessage(conversationId, message, history = []) {
       const systemMessage = new SystemMessage(`#基本的な情報
 現在の日時は${formattedDate}です。
 使用しているAIのモデルは${getCurrentModelName()}です。
+${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。` : ''}
 
 ${SYSTEM_PROMPT}`);
       messages = [systemMessage, ...messages];
@@ -321,7 +325,7 @@ ${SYSTEM_PROMPT}`);
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
         // モデルを切り替えたら再試行
-        return sendMessage(conversationId, message, history);
+        return sendMessage(conversationId, userName, message, history);
       }
     }
     

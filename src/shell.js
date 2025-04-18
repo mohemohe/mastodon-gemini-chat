@@ -70,7 +70,7 @@ function prompt() {
     
     try {
       // Gemini APIにメッセージを送信
-      const response = await sendMessage(CONVERSATION_ID, input);
+      const response = await sendMessage(CONVERSATION_ID, 'user', input);
       console.log('\n' + response + '\n');
     } catch (error) {
       console.error('エラーが発生しました:', error);
