@@ -219,6 +219,7 @@ function createLangChainMessages(history) {
   }
   
   // 会話履歴を変換
+  console.log("history:", history);
   for (const item of history) {
     if (item.role === 'user') {
       messages.push(new HumanMessage(item.content));

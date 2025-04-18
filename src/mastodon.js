@@ -137,7 +137,7 @@ function reconnect() {
 /**
  * リプライツリーから会話履歴を構築する
  * @param {string} statusId - 現在の投稿ID
- * @returns {Promise<Array<{role: string, parts: string}>>} 会話履歴の配列
+ * @returns {Promise<Array<{role: string, content: string}>>} 会話履歴の配列
  */
 async function buildConversationHistory(statusId) {
   const history = [];
@@ -161,7 +161,7 @@ async function buildConversationHistory(statusId) {
         
         history.push({
           role: isBot ? 'model' : 'user',
-          parts: content
+          content: content
         });
       }
     }
@@ -173,7 +173,7 @@ async function buildConversationHistory(statusId) {
     
     history.push({
       role: isCurrentBot ? 'model' : 'user',
-      parts: currentContent
+      content: currentContent
     });
     
     return history;
