@@ -252,8 +252,11 @@ async function handleMention(notification) {
   // Geminiにメッセージを送信
   const response = await sendMessage(conversationId, status.account.display_name || status.account.username || status.account.acct, isNewConversation ? "" : content, isNewConversation ? conversationContexts.get(accountId).history : []);
   
+  // 返信内容がメンションで始まっている場合はそのまま返信
+  const replyContent = response.startsWith(`@${status.account.acct}`) ? response : `@${status.account.acct} ${response}`;
+
   // Mastodonに返信を投稿（元の投稿のvisibilityを引き継ぐ）
-  await postReply(status.id, `@${status.account.acct} ${response}`, status.visibility);
+  await postReply(status.id, replyContent, status.visibility);
 }
 
 /**
