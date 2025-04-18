@@ -1,10 +1,8 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
+const { HumanMessage, SystemMessage } = require('@langchain/core/messages');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
-
-// Gemini API初期化
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
 const MODEL_NAMES = (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim());
@@ -35,20 +33,19 @@ function loadSystemPrompt() {
 // システムプロンプトを読み込む
 const SYSTEM_PROMPT = loadSystemPrompt();
 
-// 現在時刻をフォーマットして取得
-const now = new Date();
-const formattedDate = now.toLocaleString('ja-JP', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false
-}).replace(/\//g, '/').replace(/,/g, '');
-
-// システムプロンプトに時刻情報を追加
-const SYSTEM_PROMPT_WITH_TIME = `現在の日時は${formattedDate}です。\n${SYSTEM_PROMPT}`;
+// 現在時刻をフォーマットして取得する関数
+function getFormattedDateTime() {
+  const now = new Date();
+  return now.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).replace(/\//g, '/').replace(/,/g, '');
+}
 
 // プロンプトインジェクション防止のためのブロックワード
 const BLOCKED_PATTERNS = [
@@ -72,8 +69,14 @@ const RATE_LIMIT_PATTERNS = [
   /429/i
 ];
 
-// 使用するモデルを初期化
-const models = MODEL_NAMES.map(modelName => genAI.getGenerativeModel({ model: modelName }));
+// レート制限エラーを検出するためのパターン
+const NOT_FOUND_PATTERNS = [
+  /not found/i,
+  /404/i
+];
+
+// モデルインスタンスを保持するオブジェクト
+const modelInstances = {};
 
 // モデルの最終使用時刻を記録するオブジェクト
 const modelLastUsed = {
@@ -137,26 +140,30 @@ function isRateLimitError(error) {
 }
 
 /**
- * 会話履歴を初期化する
- * @param {string} conversationId - 会話ID
+ * エラーが404に関連するものかどうかを判定
+ * @param {Error} error - エラーオブジェクト
+ * @returns {boolean} 404エラーならtrue
  */
-function initConversation(conversationId) {
-  if (!conversations[conversationId]) {
-    const chatOptions = {
-      history: [],
-      generationConfig: {
-        temperature: 1.8,
-        maxOutputTokens: 1024,
-      },
-    };
+function isNotFoundError(error) {
+  const errorMessage = error.message.toLowerCase();
+  return NOT_FOUND_PATTERNS.some(pattern => pattern.test(errorMessage));
+}
 
-    // システムプロンプトが設定されている場合は追加
-    if (SYSTEM_PROMPT) {
-      chatOptions.history.push({ role: 'model', parts: SYSTEM_PROMPT_WITH_TIME });
-    }
-
-    conversations[conversationId] = models[currentModelIndex].startChat(chatOptions);
+/**
+ * 指定されたモデル名のLangChainチャットモデルを取得または作成
+ * @param {string} modelName - モデル名
+ * @returns {ChatGoogleGenerativeAI} チャットモデルインスタンス
+ */
+function getModelInstance(modelName) {
+  if (!modelInstances[modelName]) {
+    modelInstances[modelName] = new ChatGoogleGenerativeAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      model: modelName,
+      temperature: 1.8,
+      maxOutputTokens: 1024
+    });
   }
+  return modelInstances[modelName];
 }
 
 /**
@@ -182,15 +189,45 @@ function filterResponse(response) {
   // システムプロンプトが空の場合はフィルタリング不要
   if (!SYSTEM_PROMPT) return response;
   
-  // もしシステムプロンプトの内容が応答に含まれていたら置換
+  // システムプロンプトの内容が応答に含まれていたら置換
   if (response.includes(SYSTEM_PROMPT)) {
     return ERROR_MESSAGE;
   }
-  if (response.includes(SYSTEM_PROMPT_WITH_TIME)) {
+  
+  // 現在時刻を含むシステムプロンプトも確認（完全一致でなくても部分一致で）
+  const formattedDate = getFormattedDateTime();
+  const datePrompt = `現在の日時は${formattedDate}です。`;
+  if (response.includes(datePrompt)) {
     return ERROR_MESSAGE;
   }
   
   return response;
+}
+
+/**
+ * LangChain用のメッセージ履歴を作成
+ * @param {Array<{role: string, content: string}>} history - 会話履歴
+ * @returns {Array} LangChain形式のメッセージ履歴
+ */
+function createLangChainMessages(history) {
+  const messages = [];
+  
+  // システムプロンプトを追加
+  if (SYSTEM_PROMPT) {
+    const formattedDate = getFormattedDateTime();
+    messages.push(new SystemMessage(`現在の日時は${formattedDate}です。\n${SYSTEM_PROMPT}`));
+  }
+  
+  // 会話履歴を変換
+  for (const item of history) {
+    if (item.role === 'user') {
+      messages.push(new HumanMessage(item.content));
+    } else if (item.role === 'assistant') {
+      messages.push(new SystemMessage(item.content));
+    }
+  }
+  
+  return messages;
 }
 
 /**
@@ -208,53 +245,48 @@ async function sendMessage(conversationId, message, history = []) {
     }
     
     console.log("conversationId:", conversationId);
-    // モデルの使用時刻を更新し、必要に応じてモデルを切り替える
-    const modelSwitched = updateModelUsage();
     
-    // 会話履歴が存在する場合は、それを使用してチャットを初期化
-    if (history.length > 0 || modelSwitched) {
-      const chatOptions = {
-        history: history,
-        generationConfig: {
-          temperature: 1.8,
-          maxOutputTokens: 1024,
-        },
-      };
-
-      // システムプロンプトが設定されている場合は追加
-      if (SYSTEM_PROMPT) {
-        chatOptions.history.unshift({ role: 'model', parts: SYSTEM_PROMPT_WITH_TIME });
-      }
-      console.log("chatOptions.history:", chatOptions.history);
-      conversations[conversationId] = models[currentModelIndex].startChat(chatOptions);
-    } else {
-      initConversation(conversationId);
+    // モデルの使用時刻を更新し、必要に応じてモデルを切り替える
+    updateModelUsage();
+    
+    // 会話履歴をLangChain形式に変換
+    let messages = createLangChainMessages(history);
+    
+    // ユーザーメッセージを追加
+    messages.push(new HumanMessage(message));
+    
+    // 会話履歴が長すぎる場合は古い会話を削除（システムメッセージを保持）
+    if (messages.length > MAX_CONTEXT_LENGTH + 1) { // +1 はシステムメッセージ分
+      const systemMessage = messages[0];
+      messages = [systemMessage, ...messages.slice(-(MAX_CONTEXT_LENGTH))];
     }
     
-    const chat = conversations[conversationId];
+    // 現在のモデルインスタンスを取得
+    const modelName = MODEL_NAMES[currentModelIndex];
+    const model = getModelInstance(modelName);
     
-    const result = await chat.sendMessage(message);
-    const response = await result.response;
-    const text = response.text();
+    // モデルに問い合わせ
+    const response = await model.invoke(messages);
+    const text = response.text;
     
     // レスポンスのフィルタリング
     const filteredText = filterResponse(text);
     
-    // 会話履歴が長すぎる場合は古い会話を削除
-    if (chat.history?.length > MAX_CONTEXT_LENGTH * 2) {
-      chat.history = chat.history.slice(-MAX_CONTEXT_LENGTH * 2);
+    // 会話履歴を更新（このステップはLangChainを使う場合は不要かもしれませんが、
+    // 既存のコードとの互換性のために残しています）
+    if (!conversations[conversationId]) {
+      conversations[conversationId] = { history: [] };
     }
     
     return filteredText;
   } catch (error) {
-    console.error('Gemini API error:', error);
+    console.error('LangChain API error:', error);
     
-    // レート制限エラーの場合、次のモデルに切り替えて再試行
-    if (isRateLimitError(error)) {
+    // エラーの場合、次のモデルに切り替えて再試行
+    if (isRateLimitError(error) || isNotFoundError(error)) {
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
-        // モデルを切り替えたら、会話を新しいモデルで再初期化して再試行
-        delete conversations[conversationId];
+        // モデルを切り替えたら再試行
         return sendMessage(conversationId, message, history);
       }
     }
