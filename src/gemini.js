@@ -299,12 +299,23 @@ ${SYSTEM_PROMPT}`);
     // モデルに問い合わせ
     let text = "";
     for (let i = 0; i < 3; i++) {
-      const response = await model.invoke(messages, {
-        timeout: 30000,
-      });
-      text = response.text;
-      if (!text) {
-        continue;
+      try {
+        const response = await model.invoke(messages, {
+          timeout: 60000,
+        });
+        text = response.text;
+        if (!text) {
+          continue;
+        }
+      } catch (error) {
+        console.error('LangChain API error:', error);
+        if (isRateLimitError(error) || isNotFoundError(error) || i == 2) {
+          console.log('Rate limit detected, attempting to switch models...');
+          if (switchToNextModel()) {
+            // モデルを切り替えたら再試行
+            return sendMessage(conversationId, userName, message, history);
+          }
+        }
       }
       break;
     }
