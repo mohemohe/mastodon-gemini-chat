@@ -67,7 +67,6 @@ function prompt(): void {
     try {
       let ctx = conversationContexts.get(CONVERSATION_ID);
       if (!ctx) {
-        isNewConversation = true;
         conversationContexts.set(CONVERSATION_ID, {
           id: CONVERSATION_ID,
           timestamp: Date.now(),
