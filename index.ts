@@ -1,9 +1,8 @@
-require('dotenv').config();
-const { connect, disconnect } = require('./src/mastodon');
+import 'dotenv/config';
+import { connect, disconnect } from './src/mastodon';
 
 console.log('Starting Mastodon Gemini Chat Bot...');
 
-// 環境変数のチェック
 const requiredEnvVars = [
   'MASTODON_SERVER',
   'MASTODON_ACCESS_TOKEN',
@@ -14,17 +13,17 @@ const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
   console.error('Missing required environment variables:');
-  missingEnvVars.forEach(varName => console.error(`- ${varName}`));
+  for (const varName of missingEnvVars) {
+    console.error(`- ${varName}`);
+  }
   console.error('Please set these variables in the .env file');
   process.exit(1);
 }
 
-// Mastodon ストリーミングに接続
 connect();
 
 console.log('Bot is running. Press Ctrl+C to stop.');
 
-// プロセス終了時の処理
 process.on('SIGINT', () => {
   console.log('Shutting down...');
   disconnect();
