@@ -149,6 +149,10 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
     console.log('Skipping mention with ! mark');
     return;
   }
+  // 画像URL配列を抽出
+  const images = (status.media_attachments || [])
+    .filter(att => att.type === 'image' && att.url)
+    .map(att => att.url);
   let rootStatusId = status.id;
   if (status.in_reply_to_id) {
     try {
@@ -186,7 +190,14 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
   }
   const ctx = conversationContexts.get(accountId);
   const historyArg = isNewConversation ? (ctx ? ctx.history : []) : [];
-  const response = await sendMessage(conversationId, status.account.display_name || status.account.username || status.account.acct, isNewConversation ? '' : content, historyArg);
+  // imagesをsendMessageに渡す
+  const response = await sendMessage(
+    conversationId,
+    status.account.display_name || status.account.username || status.account.acct,
+    isNewConversation ? '' : content,
+    historyArg,
+    images
+  );
   const replyContent = response.startsWith(`@${status.account.acct}`) ? response : `@${status.account.acct} ${response}`;
   await postReply(status.id, replyContent, status.visibility);
 }

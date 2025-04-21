@@ -173,7 +173,8 @@ export async function sendMessage(
   conversationId: string,
   userName: string,
   message: string,
-  history: Array<{ role: string; content: string }> = []
+  history: Array<{ role: string; content: string }> = [],
+  images?: string[]
 ): Promise<string> {
   try {
     if (!isMessageSafe(message)) {
@@ -209,9 +210,24 @@ export async function sendMessage(
     const modelName = getCurrentModelName();
     const model = getModelInstance(modelName);
     let text = '';
+    // vision, flash, proを含むモデルは画像入力対応とみなす
+    const isImageInputSupported = /(vision|flash|pro)/.test(modelName);
+    let inputMessages = messages;
+    if (isImageInputSupported && images && images.length > 0) {
+      // 画像＋テキストのHumanMessageを1つだけ送る（履歴は無視）
+      inputMessages = [
+        new SystemMessage({ content: typeof messages[0].content === 'string' ? messages[0].content : '' }),
+        new HumanMessage({
+          content: [
+            { type: 'text', text: message || '画像を解析してください。' },
+            ...images.map(url => ({ type: 'image_url', image_url: url }))
+          ]
+        })
+      ];
+    }
     for (let i = 0; i < 3; i++) {
       try {
-        const response = await model.invoke(messages, {
+        const response = await model.invoke(inputMessages, {
           timeout: 60000,
         });
         text = response.text;
@@ -224,7 +240,7 @@ export async function sendMessage(
         if (i === 2 || isRateLimitError(err) || isNotFoundError(err)) {
           console.log('Rate limit or critical error detected, attempting to switch models...');
           if (switchToNextModel()) {
-            return sendMessage(conversationId, userName, message, history);
+            return sendMessage(conversationId, userName, message, history, images);
           }
           if (i === 2) break;
         }
@@ -239,7 +255,7 @@ export async function sendMessage(
     if (isRateLimitError(err) || isNotFoundError(err)) {
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
-        return sendMessage(conversationId, userName, message, history);
+        return sendMessage(conversationId, userName, message, history, images);
       }
     }
     return ERROR_MESSAGE;
