@@ -4,6 +4,7 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
 import fs from 'node:fs';
 import dotenv from 'dotenv';
+import fetch from 'node-fetch';
 dotenv.config();
 
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
@@ -174,7 +175,7 @@ export async function sendMessage(
   userName: string,
   message: string,
   history: Array<{ role: string; content: string }> = [],
-  images?: string[]
+  image?: string
 ): Promise<string> {
   try {
     if (!isMessageSafe(message)) {
@@ -206,25 +207,25 @@ export async function sendMessage(
       const systemMessage = messages[0];
       messages = [systemMessage, ...messages.slice(-MAX_CONTEXT_LENGTH)];
     }
-    console.log('messages:', JSON.parse(JSON.stringify(messages)));
     const modelName = getCurrentModelName();
     const model = getModelInstance(modelName);
     let text = '';
     // vision, flash, proを含むモデルは画像入力対応とみなす
     const isImageInputSupported = /(vision|flash|pro)/.test(modelName);
-    let inputMessages = messages;
-    if (isImageInputSupported && images && images.length > 0) {
-      // 画像＋テキストのHumanMessageを1つだけ送る（履歴は無視）
-      inputMessages = [
-        new SystemMessage({ content: typeof messages[0].content === 'string' ? messages[0].content : '' }),
-        new HumanMessage({
-          content: [
-            { type: 'text', text: message || '画像を解析してください。' },
-            ...images.map(url => ({ type: 'image_url', image_url: url }))
-          ]
-        })
-      ];
+    const inputMessages = messages;
+    // imageはbase64データURL前提（Mastodon側で変換済み）
+    if (isImageInputSupported && image) {
+      const last = inputMessages[inputMessages.length - 1];
+      console.log('last:', last);
+      console.log('image:', image);
+      if (last instanceof HumanMessage) {
+        last.content = [
+          { type: 'text', text: message || '画像を解析してください。' },
+          { type: 'image_url', image_url: image }
+        ];
+      }
     }
+    console.log('messages:', JSON.parse(JSON.stringify(messages)));
     for (let i = 0; i < 3; i++) {
       try {
         const response = await model.invoke(inputMessages, {
@@ -240,7 +241,7 @@ export async function sendMessage(
         if (i === 2 || isRateLimitError(err) || isNotFoundError(err)) {
           console.log('Rate limit or critical error detected, attempting to switch models...');
           if (switchToNextModel()) {
-            return sendMessage(conversationId, userName, message, history, images);
+            return sendMessage(conversationId, userName, message, history, image);
           }
           if (i === 2) break;
         }
@@ -255,7 +256,7 @@ export async function sendMessage(
     if (isRateLimitError(err) || isNotFoundError(err)) {
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
-        return sendMessage(conversationId, userName, message, history, images);
+        return sendMessage(conversationId, userName, message, history, image);
       }
     }
     return ERROR_MESSAGE;

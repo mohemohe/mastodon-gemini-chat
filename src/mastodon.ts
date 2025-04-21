@@ -4,7 +4,22 @@ import type { Entity } from 'megalodon/lib/src/entity';
 import { sendMessage } from './gemini';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
+import fetch from 'node-fetch';
 dotenv.config();
+
+/**
+ * 画像URLをbase64データURLに変換する（Gemini API用）
+ * @param imageUrl 画像のURL
+ * @returns base64データURL
+ */
+async function imageUrlToBase64DataUrl(imageUrl: string): Promise<string> {
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error('Failed to fetch image');
+  const contentType = response.headers.get('content-type') || 'image/png';
+  const buffer = await response.buffer();
+  const base64 = buffer.toString('base64');
+  return `data:${contentType};base64,${base64}`;
+}
 
 // 環境変数から設定を読み込む
 const MASTODON_SERVER: string = process.env.MASTODON_SERVER || '';
@@ -153,6 +168,14 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
   const images = (status.media_attachments || [])
     .filter(att => att.type === 'image' && att.url)
     .map(att => att.url);
+  let imageDataUrl: string | undefined = undefined;
+  if (images.length > 0) {
+    try {
+      imageDataUrl = await imageUrlToBase64DataUrl(images[0]);
+    } catch (error) {
+      console.error('Error converting image to base64:', error);
+    }
+  }
   let rootStatusId = status.id;
   if (status.in_reply_to_id) {
     try {
@@ -196,7 +219,7 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
     status.account.display_name || status.account.username || status.account.acct,
     isNewConversation ? '' : content,
     historyArg,
-    images
+    imageDataUrl,
   );
   const replyContent = response.startsWith(`@${status.account.acct}`) ? response : `@${status.account.acct} ${response}`;
   await postReply(status.id, replyContent, status.visibility);
