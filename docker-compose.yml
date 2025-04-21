@@ -11,4 +11,4 @@ services:
       - ./src:/app/src
       - ./index.js:/app/index.js
       - ./.env:/app/.env
-      - ./.systemprompt:/app/.systemprompt 
+      - ./data:/app/data

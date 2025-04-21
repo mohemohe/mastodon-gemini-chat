@@ -5,6 +5,9 @@ import { sendMessage } from './gemini';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import fs from 'node:fs';
+import path from 'node:path';
+import { setUserSystemPrompt, getUserSystemPrompt, getSystemPromptFilePath, isCommand, handleChatCommand, isChatCommand, conversationContexts, readSystemPrompt } from './chat';
 dotenv.config();
 
 /**
@@ -36,39 +39,6 @@ const client: MegalodonInterface = megalodon(
 
 // WebSocketストリーム
 let stream: WebSocketInterface | null = null;
-
-// 会話コンテキストを管理するためのマップ
-// key: 会話相手のアカウントID, value: {id: 会話ID, timestamp: 最終更新時間}
-type ConversationContext = {
-  id: string;
-  timestamp: number;
-  rootStatusId: string;
-  history: Array<{ role: string; content: string }>;
-};
-const conversationContexts: Map<string, ConversationContext> = new Map();
-
-const CONTEXT_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24時間
-const MAX_CONTEXTS = 1000; // 最大保持数
-
-function cleanupConversationContexts(): void {
-  const now = Date.now();
-  for (const [accountId, context] of conversationContexts.entries()) {
-    if (now - context.timestamp > CONTEXT_EXPIRY_MS) {
-      conversationContexts.delete(accountId);
-    }
-  }
-  if (conversationContexts.size > MAX_CONTEXTS) {
-    const sortedContexts = [...conversationContexts.entries()]
-      .sort((a, b) => a[1].timestamp - b[1].timestamp);
-    const numberOfContextsToRemove = conversationContexts.size - MAX_CONTEXTS;
-    for (let i = 0; i < numberOfContextsToRemove; i++) {
-      conversationContexts.delete(sortedContexts[i][0]);
-    }
-  }
-  console.log(`Cleaned up conversation contexts. Current count: ${conversationContexts.size}`);
-}
-
-setInterval(cleanupConversationContexts, 60 * 60 * 1000);
 
 let me_acct = '';
 
@@ -160,8 +130,13 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
   const status = notification.status as Entity.Status;
   const content = stripHtml(status.content);
   const accountId = status.account.id;
+  const acct = status.account.acct;
   if (content.includes(`@${me_acct} !`) || content.includes(`@${me_acct}@${domain} !`)) {
-    console.log('Skipping mention with ! mark');
+    const message = content.replace(`@${me_acct}@${domain}`, '').replace(`@${me_acct}`, '').trim();
+    if (isCommand(message) && isChatCommand(message)) {
+      const replyContent = handleChatCommand(message, acct);
+      await postReply(status, replyContent, status.visibility);
+    }
     return;
   }
   // 画像URL配列を抽出
@@ -192,6 +167,7 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
     }
   }
   const conversationContext = conversationContexts.get(accountId);
+  console.log("conversationContext:", conversationContext);
   let conversationId: string;
   let isNewConversation = false;
   if (!conversationContext || conversationContext.rootStatusId !== rootStatusId) {
@@ -213,16 +189,19 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
   }
   const ctx = conversationContexts.get(accountId);
   const historyArg = isNewConversation ? (ctx ? ctx.history : []) : [];
+  // Gemini用systemprompt取得（今後の拡張用）
+  const userSystemPrompt = getUserSystemPrompt(acct);
+  const systemPrompt = userSystemPrompt ? readSystemPrompt(userSystemPrompt) : '';
   // imagesをsendMessageに渡す
   const response = await sendMessage(
+    systemPrompt,
     conversationId,
     status.account.display_name || status.account.username || status.account.acct,
     isNewConversation ? '' : content,
     historyArg,
     imageDataUrl,
   );
-  const replyContent = response.startsWith(`@${status.account.acct}`) ? response : `@${status.account.acct} ${response}`;
-  await postReply(status.id, replyContent, status.visibility);
+  await postReply(status, response, status.visibility);
 }
 
 function stripHtml(html: string): string {
@@ -236,10 +215,11 @@ function stripHtml(html: string): string {
   return strippedHtml;
 }
 
-async function postReply(statusId: string, content: string, visibility: Entity.StatusVisibility = 'unlisted'): Promise<void> {
+async function postReply(status: Entity.Status, content: string, visibility: Entity.StatusVisibility = 'unlisted'): Promise<void> {
+  const replyContent = content.startsWith(`@${status.account.acct}`) ? content : `@${status.account.acct} ${content}`;
   try {
-    const response = await client.postStatus(content, {
-      in_reply_to_id: statusId,
+    const response = await client.postStatus(replyContent, {
+      in_reply_to_id: status.id,
       visibility: visibility
     });
     console.log(`Reply posted successfully with visibility '${visibility}':`, response.data.id);

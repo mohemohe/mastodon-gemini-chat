@@ -4,9 +4,10 @@ import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sendMessage, clearConversation } from './gemini';
+import { setUserSystemPrompt, getUserSystemPrompt, isCommand, isChatCommand, handleChatCommand, readSystemPrompt, conversationContexts } from './chat';
 
 const CONVERSATION_ID = 'shell-session';
-const HISTORY_FILE = path.join(process.cwd(), '.shell_history');
+const HISTORY_FILE = path.join(process.cwd(), 'data', '.shell_history');
 
 function loadHistory(): string[] {
   try {
@@ -55,19 +56,34 @@ console.log('-------------------------------------------');
 
 function prompt(): void {
   rl.question('> ', async (input: string) => {
-    if (["exit", "quit"].includes(input.toLowerCase())) {
-      console.log('さようなら！');
-      rl.close();
-      process.exit(0);
-    }
-    if (input.toLowerCase() === 'clear') {
-      await clearConversation(CONVERSATION_ID);
-      console.log('会話履歴をクリアしました');
+    if (isCommand(input)) {
+      // !chat systemprompt [value] コマンド判定
+      if (isChatCommand(input)) {
+        console.log(handleChatCommand(input, CONVERSATION_ID));
+      } // !chat 以外のコマンドは無視
       prompt();
       return;
     }
     try {
-      const response = await sendMessage(CONVERSATION_ID, 'user', input);
+      let ctx = conversationContexts.get(CONVERSATION_ID);
+      if (!ctx) {
+        isNewConversation = true;
+        conversationContexts.set(CONVERSATION_ID, {
+          id: CONVERSATION_ID,
+          timestamp: Date.now(),
+          rootStatusId: '',
+          history: []
+        });
+        ctx = {
+          id: CONVERSATION_ID,
+          timestamp: Date.now(),
+          rootStatusId: '',
+          history: []
+        };
+      }
+      
+      const systemPrompt = readSystemPrompt(getUserSystemPrompt('shell') || '');
+      const response = await sendMessage(systemPrompt, ctx.timestamp.toString(), 'user', input);
       console.log(`\n${response}\n`);
     } catch (error) {
       console.error('エラーが発生しました:', error);

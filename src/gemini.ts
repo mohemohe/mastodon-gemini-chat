@@ -4,7 +4,6 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
 import fs from 'node:fs';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
 dotenv.config();
 
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
@@ -171,6 +170,7 @@ function filterResponse(response: string): string {
 }
 
 export async function sendMessage(
+  systemPrompt: string,
   conversationId: string,
   userName: string,
   message: string,
@@ -197,12 +197,10 @@ export async function sendMessage(
     if (message) {
       await messageHistory.addUserMessage(message);
     }
+    const formattedDate = getFormattedDateTime();
+    const systemMessage = new SystemMessage(`#基本的な情報\n現在の日時は${formattedDate}です。\n使用しているAIのモデルは${getCurrentModelName()}です。\n${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。会話相手のユーザー名の先頭に「@」を付けないでください。` : ''}\n\n${systemPrompt}`);
     let messages: BaseMessage[] = await messageHistory.getMessages();
-    if (SYSTEM_PROMPT) {
-      const formattedDate = getFormattedDateTime();
-      const systemMessage = new SystemMessage(`#基本的な情報\n現在の日時は${formattedDate}です。\n使用しているAIのモデルは${getCurrentModelName()}です。\n${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。` : ''}\n\n${SYSTEM_PROMPT}`);
-      messages = [systemMessage, ...messages];
-    }
+    messages = [systemMessage, ...messages];
     if (messages.length > MAX_CONTEXT_LENGTH + 1) {
       const systemMessage = messages[0];
       messages = [systemMessage, ...messages.slice(-MAX_CONTEXT_LENGTH)];
@@ -241,7 +239,7 @@ export async function sendMessage(
         if (i === 2 || isRateLimitError(err) || isNotFoundError(err)) {
           console.log('Rate limit or critical error detected, attempting to switch models...');
           if (switchToNextModel()) {
-            return sendMessage(conversationId, userName, message, history, image);
+            return sendMessage(systemPrompt, conversationId, userName, message, history, image);
           }
           if (i === 2) break;
         }
@@ -256,7 +254,7 @@ export async function sendMessage(
     if (isRateLimitError(err) || isNotFoundError(err)) {
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
-        return sendMessage(conversationId, userName, message, history, image);
+        return sendMessage(systemPrompt, conversationId, userName, message, history, image);
       }
     }
     return ERROR_MESSAGE;
