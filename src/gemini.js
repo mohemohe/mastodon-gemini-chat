@@ -304,20 +304,27 @@ ${SYSTEM_PROMPT}`);
           timeout: 60000,
         });
         text = response.text;
-        if (!text) {
-          continue;
+        if (text) {
+          // テキストが取得できたらループを抜ける
+          break;
         }
+        // テキストが空の場合は次のリトライへ
       } catch (error) {
-        console.error('LangChain API error:', error);
-        if (isRateLimitError(error) || isNotFoundError(error) || i == 2) {
-          console.log('Rate limit detected, attempting to switch models...');
+        console.error(`LangChain API error (attempt ${i+1}/3):`, error);
+        
+        // 最終試行でエラーが発生した場合、または特定のエラータイプの場合はモデル切り替え
+        if (i === 2 || isRateLimitError(error) || isNotFoundError(error)) {
+          console.log('Rate limit or critical error detected, attempting to switch models...');
           if (switchToNextModel()) {
             // モデルを切り替えたら再試行
             return sendMessage(conversationId, userName, message, history);
           }
+          // モデル切り替え失敗ならエラーとして扱う
+          if (i === 2) break;
         }
+        
+        // 最終試行ではないエラーの場合は次のループへ
       }
-      break;
     }
 
     
