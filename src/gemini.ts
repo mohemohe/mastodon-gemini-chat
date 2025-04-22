@@ -235,6 +235,9 @@ export async function sendMessage(
           timeout: 60000,
         });
         text = response.text;
+        if (!text) {
+          throw new Error('Missing response text');
+        }
         if (text) {
           break;
         }
