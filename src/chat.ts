@@ -32,7 +32,7 @@ export function writeUsersJson(users: Record<string, { systemprompt: string }>):
   }
 }
 
-export function getSystemPromptFilePath(value: string): string {
+export function getSystemPromptFilePath(value?: string): string {
   ensureDataDir();
   if (!value || value.length === 0) {
     return path.join(DATA_DIR, '.systemprompt');
@@ -68,7 +68,7 @@ export function getUserSystemPrompt(acct: string): string | undefined {
   return users[acct]?.systemprompt;
 }
 
-export function readSystemPrompt(value: string): string {
+export function readSystemPrompt(value?: string): string {
   const filePath = getSystemPromptFilePath(value);
   if (!fs.existsSync(filePath)) {
     return '';

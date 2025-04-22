@@ -189,9 +189,8 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
   }
   const ctx = conversationContexts.get(accountId);
   const historyArg = isNewConversation ? (ctx ? ctx.history : []) : [];
-  // Gemini用systemprompt取得（今後の拡張用）
   const userSystemPrompt = getUserSystemPrompt(acct);
-  const systemPrompt = userSystemPrompt ? readSystemPrompt(userSystemPrompt) : '';
+  const systemPrompt = readSystemPrompt(userSystemPrompt);
   // imagesをsendMessageに渡す
   const response = await sendMessage(
     systemPrompt,
