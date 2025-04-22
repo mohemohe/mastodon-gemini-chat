@@ -175,8 +175,13 @@ export async function sendMessage(
   userName: string,
   message: string,
   history: Array<{ role: string; content: string }> = [],
-  image?: string
+  image?: string,
+  recursiveCount = 0,
 ): Promise<string> {
+  if (recursiveCount > (Object.keys(modelInstances).length * 3) + 1) {
+    return ERROR_MESSAGE;
+  }
+
   try {
     if (!isMessageSafe(message)) {
       return ERROR_MESSAGE;
@@ -239,7 +244,7 @@ export async function sendMessage(
         if (i === 2 || isRateLimitError(err) || isNotFoundError(err)) {
           console.log('Rate limit or critical error detected, attempting to switch models...');
           if (switchToNextModel()) {
-            return sendMessage(systemPrompt, conversationId, userName, message, history, image);
+            return sendMessage(systemPrompt, conversationId, userName, message, history, image, recursiveCount + 1);
           }
           if (i === 2) break;
         }
@@ -254,7 +259,7 @@ export async function sendMessage(
     if (isRateLimitError(err) || isNotFoundError(err)) {
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
-        return sendMessage(systemPrompt, conversationId, userName, message, history, image);
+        return sendMessage(systemPrompt, conversationId, userName, message, history, image, recursiveCount + 1);
       }
     }
     return ERROR_MESSAGE;
