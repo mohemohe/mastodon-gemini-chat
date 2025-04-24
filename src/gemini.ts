@@ -186,7 +186,6 @@ export async function sendMessage(
     if (!isMessageSafe(message)) {
       return ERROR_MESSAGE;
     }
-    console.log('conversationId:', conversationId);
     updateModelUsage();
     const messageHistory = getMessageHistory(conversationId);
     if (history.length > 0) {
@@ -203,7 +202,14 @@ export async function sendMessage(
       await messageHistory.addUserMessage(message);
     }
     const formattedDate = getFormattedDateTime();
-    const systemMessage = new SystemMessage(`#基本的な情報\n現在の日時は${formattedDate}です。\n使用しているAIのモデルは${getCurrentModelName()}です。\n${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。会話相手のユーザー名の先頭に「@」を付けないでください。` : ''}\n\n${systemPrompt}`);
+    const systemMessage = new SystemMessage(`## 基本的な情報
+現在の日時は${formattedDate}です。
+タイムゾーンは${process.env.TZ || "JST"}です。
+日付を扱う場合はユーザーの言語を考慮してください（例: 日本語 -> JST, UTC+9, Asia/Tokyo）。
+使用しているAIのモデルは${getCurrentModelName()}です。
+${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。会話相手のユーザー名の先頭に「@」を付けないでください。` : ''}
+
+${systemPrompt}`);
     let messages: BaseMessage[] = await messageHistory.getMessages();
     messages = [systemMessage, ...messages];
     if (messages.length > MAX_CONTEXT_LENGTH + 1) {
@@ -219,8 +225,6 @@ export async function sendMessage(
     // imageはbase64データURL前提（Mastodon側で変換済み）
     if (isImageInputSupported && image) {
       const last = inputMessages[inputMessages.length - 1];
-      console.log('last:', last);
-      console.log('image:', image);
       if (last instanceof HumanMessage) {
         last.content = [
           { type: 'text', text: message || '画像を解析してください。' },
@@ -228,7 +232,6 @@ export async function sendMessage(
         ];
       }
     }
-    console.log('messages:', JSON.parse(JSON.stringify(messages)));
     for (let i = 0; i < 3; i++) {
       try {
         const response = await model.invoke(inputMessages, {
