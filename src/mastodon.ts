@@ -190,7 +190,8 @@ async function handleMention(notification: Entity.Notification): Promise<void> {
   const ctx = conversationContexts.get(accountId);
   const historyArg = isNewConversation ? (ctx ? ctx.history : []) : [];
   const userSystemPrompt = getUserSystemPrompt(acct);
-  const systemPrompt = readSystemPrompt(userSystemPrompt);
+  const pastPosts = await fetchMyPastPosts(20);
+  const systemPrompt = await readSystemPrompt(userSystemPrompt, pastPosts);
   // imagesをsendMessageに渡す
   const response = await sendMessage(
     systemPrompt,
@@ -239,4 +240,24 @@ function disconnect(): void {
   }
 }
 
-export { connect, disconnect }; 
+async function fetchMyPastPosts(limit: number = 20): Promise<string> {
+  try {
+    const myAccount = await client.verifyAccountCredentials();
+    const response = await client.getAccountStatuses(myAccount.data.id, { limit });
+    const posts = response.data
+      .map(status => stripHtml(status.content))
+      .filter(content => content.trim().length > 0)
+      .slice(0, limit);
+    
+    if (posts.length === 0) {
+      return '';
+    }
+    
+    return `## 過去の投稿\n\n${posts.map(post => `- ${post}`).join('\n')}`;
+  } catch (error) {
+    console.error('Error fetching past posts:', error);
+    return '';
+  }
+}
+
+export { connect, disconnect, fetchMyPastPosts }; 

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { sendMessage, clearConversation } from './gemini';
 import { setUserSystemPrompt, getUserSystemPrompt, isCommand, isChatCommand, handleChatCommand, readSystemPrompt, conversationContexts } from './chat';
+import { fetchMyPastPosts } from './mastodon';
 
 const CONVERSATION_ID = 'shell-session';
 const HISTORY_FILE = path.join(process.cwd(), 'data', '.shell_history');
@@ -81,7 +82,8 @@ function prompt(): void {
         };
       }
       
-      const systemPrompt = readSystemPrompt(getUserSystemPrompt('shell') || '');
+      const pastPosts = await fetchMyPastPosts(20);
+      const systemPrompt = await readSystemPrompt(getUserSystemPrompt('shell') || '', pastPosts);
       const response = await sendMessage(systemPrompt, ctx.timestamp.toString(), 'user', input);
       console.log(`\n${response}\n`);
     } catch (error) {

@@ -68,12 +68,18 @@ export function getUserSystemPrompt(acct: string): string | undefined {
   return users[acct]?.systemprompt;
 }
 
-export function readSystemPrompt(value?: string): string {
+export async function readSystemPrompt(value?: string, pastPosts?: string): Promise<string> {
   const filePath = getSystemPromptFilePath(value);
-  if (!fs.existsSync(filePath)) {
-    return '';
+  let basePrompt = '';
+  if (fs.existsSync(filePath)) {
+    basePrompt = fs.readFileSync(filePath, 'utf-8');
   }
-  return fs.readFileSync(filePath, 'utf-8');
+  
+  if (pastPosts && pastPosts.trim().length > 0) {
+    return basePrompt + '\n\n' + pastPosts;
+  }
+  
+  return basePrompt;
 }
 
 export function isCommand(input: string): boolean {
