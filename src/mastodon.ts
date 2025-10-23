@@ -216,7 +216,11 @@ function stripHtml(html: string): string {
 }
 
 async function postReply(status: Entity.Status, content: string, visibility: Entity.StatusVisibility = 'unlisted'): Promise<void> {
-  const replyContent = content.startsWith(`@${status.account.acct}`) ? content : `@${status.account.acct} ${content}`;
+  // 自分自身へのメンションを削除して無限ループを防ぐ
+  let cleanedContent = content.replace(new RegExp(`@${me_acct}@${domain}`, 'g'), me_acct);
+  cleanedContent = cleanedContent.replace(new RegExp(`@${me_acct}(?!@)`, 'g'), me_acct);
+
+  const replyContent = cleanedContent.startsWith(`@${status.account.acct}`) ? cleanedContent : `@${status.account.acct} ${cleanedContent}`;
   try {
     const response = await client.postStatus(replyContent, {
       in_reply_to_id: status.id,
