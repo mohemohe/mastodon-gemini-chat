@@ -3,11 +3,18 @@ import { connect, disconnect } from './src/mastodon';
 
 console.log('Starting Mastodon Gemini Chat Bot...');
 
+// 基本的な必須環境変数
 const requiredEnvVars = [
   'MASTODON_SERVER',
-  'MASTODON_ACCESS_TOKEN',
-  'GEMINI_API_KEY'
+  'MASTODON_ACCESS_TOKEN'
 ];
+
+// プロバイダーに応じた必須環境変数を追加
+const llmProvider = process.env.LLM_PROVIDER || 'gemini';
+if (llmProvider === 'gemini') {
+  requiredEnvVars.push('GEMINI_API_KEY');
+}
+// OpenAI互換APIの場合、API Keyは任意（ローカルLLMの場合は不要）
 
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
