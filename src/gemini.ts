@@ -1,4 +1,5 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { ChatOpenAI } from '@langchain/openai';
 import type { BaseMessage } from '@langchain/core/messages';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
@@ -6,8 +7,13 @@ import fs from 'node:fs';
 import dotenv from 'dotenv';
 dotenv.config();
 
+// LLMプロバイダーの設定（デフォルト: gemini）
+const LLM_PROVIDER: string = process.env.LLM_PROVIDER || 'gemini';
+
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
-const MODEL_NAMES: string[] = (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim());
+const MODEL_NAMES: string[] = LLM_PROVIDER === 'gemini'
+  ? (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim())
+  : [(process.env.OPENAI_MODEL || 'gpt-4o-mini')];
 let currentModelIndex = 0;
 
 // エラーメッセージを環境変数から取得
@@ -71,15 +77,16 @@ const NOT_FOUND_PATTERNS: RegExp[] = [
   /404/i
 ];
 
-const modelInstances: Record<string, ChatGoogleGenerativeAI> = {};
+const modelInstances: Record<string, ChatGoogleGenerativeAI | ChatOpenAI> = {};
 
 const modelLastUsed: { timestamp: number; modelIndex: number } = {
   timestamp: Date.now(),
   modelIndex: 0
 };
 
-console.log(`Available Gemini models: ${MODEL_NAMES.join(', ')}`);
-console.log(`Using Gemini model: ${MODEL_NAMES[currentModelIndex]}`);
+console.log(`LLM Provider: ${LLM_PROVIDER}`);
+console.log(`Available models: ${MODEL_NAMES.join(', ')}`);
+console.log(`Using model: ${MODEL_NAMES[currentModelIndex]}`);
 
 const messageHistories: Record<string, InMemoryChatMessageHistory> = {};
 
@@ -131,18 +138,45 @@ function isNotFoundError(error: Error): boolean {
   return NOT_FOUND_PATTERNS.some(pattern => pattern.test(errorMessage));
 }
 
-function getModelInstance(modelName: string): ChatGoogleGenerativeAI {
+function getModelInstance(modelName: string): ChatGoogleGenerativeAI | ChatOpenAI {
   if (!modelInstances[modelName]) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is not set');
+    if (LLM_PROVIDER === 'gemini') {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('GEMINI_API_KEY is not set');
+      }
+      modelInstances[modelName] = new ChatGoogleGenerativeAI({
+        apiKey,
+        model: modelName,
+        temperature: 1.8,
+        maxOutputTokens: 1024
+      });
+    } else if (LLM_PROVIDER === 'openai') {
+      const apiKey = process.env.OPENAI_API_KEY;
+      const baseURL = process.env.OPENAI_BASE_URL;
+
+      const config: any = {
+        model: modelName,
+        temperature: 1.8,
+        maxTokens: 1024
+      };
+
+      // API Keyが設定されている場合のみ使用
+      if (apiKey) {
+        config.apiKey = apiKey;
+      }
+
+      // Base URLが設定されている場合のみ使用
+      if (baseURL) {
+        config.configuration = {
+          baseURL: baseURL
+        };
+      }
+
+      modelInstances[modelName] = new ChatOpenAI(config);
+    } else {
+      throw new Error(`Unsupported LLM_PROVIDER: ${LLM_PROVIDER}`);
     }
-    modelInstances[modelName] = new ChatGoogleGenerativeAI({
-      apiKey,
-      model: modelName,
-      temperature: 1.8,
-      maxOutputTokens: 1024
-    });
   }
   return modelInstances[modelName];
 }
@@ -219,8 +253,15 @@ ${systemPrompt}`);
     const modelName = getCurrentModelName();
     const model = getModelInstance(modelName);
     let text = '';
-    // vision, flash, proを含むモデルは画像入力対応とみなす
-    const isImageInputSupported = /(vision|flash|pro)/.test(modelName);
+    // 画像入力対応モデルの判定
+    let isImageInputSupported = false;
+    if (LLM_PROVIDER === 'gemini') {
+      // vision, flash, proを含むモデルは画像入力対応とみなす
+      isImageInputSupported = /(vision|flash|pro)/.test(modelName);
+    } else if (LLM_PROVIDER === 'openai') {
+      // OpenAI: vision, gpt-4o, gpt-4-turboなどは画像対応
+      isImageInputSupported = /(vision|gpt-4o|gpt-4-turbo)/.test(modelName);
+    }
     const inputMessages = messages;
     // imageはbase64データURL前提（Mastodon側で変換済み）
     if (isImageInputSupported && image) {
