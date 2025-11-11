@@ -1,5 +1,6 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
 import type { BaseMessage } from '@langchain/core/messages';
 import { HumanMessage, AIMessage, SystemMessage } from '@langchain/core/messages';
 import { createAgent, tool } from 'langchain';
@@ -16,6 +17,8 @@ const LLM_PROVIDER: string = process.env.LLM_PROVIDER || 'gemini';
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
 const MODEL_NAMES: string[] = LLM_PROVIDER === 'gemini'
   ? (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim())
+  : LLM_PROVIDER === 'anthropic'
+  ? (process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022,claude-3-5-haiku-20241022').split(',').map(model => model.trim())
   : [(process.env.OPENAI_MODEL || 'gpt-4o-mini')];
 let currentModelIndex = 0;
 
@@ -80,7 +83,7 @@ const NOT_FOUND_PATTERNS: RegExp[] = [
   /404/i
 ];
 
-const modelInstances: Record<string, ChatGoogleGenerativeAI | ChatOpenAI> = {};
+const modelInstances: Record<string, ChatGoogleGenerativeAI | ChatOpenAI | ChatAnthropic> = {};
 
 const modelLastUsed: { timestamp: number; modelIndex: number } = {
   timestamp: Date.now(),
@@ -149,7 +152,7 @@ function isNotFoundError(error: Error): boolean {
   return NOT_FOUND_PATTERNS.some(pattern => pattern.test(errorMessage));
 }
 
-function getModelInstance(modelName: string): ChatGoogleGenerativeAI | ChatOpenAI {
+function getModelInstance(modelName: string): ChatGoogleGenerativeAI | ChatOpenAI | ChatAnthropic {
   if (!modelInstances[modelName]) {
     if (LLM_PROVIDER === 'gemini') {
       const apiKey = process.env.GEMINI_API_KEY;
@@ -159,8 +162,6 @@ function getModelInstance(modelName: string): ChatGoogleGenerativeAI | ChatOpenA
       modelInstances[modelName] = new ChatGoogleGenerativeAI({
         apiKey,
         model: modelName,
-        temperature: 1.8,
-        maxOutputTokens: 1024
       });
     } else if (LLM_PROVIDER === 'openai') {
       const apiKey = process.env.OPENAI_API_KEY;
@@ -168,8 +169,6 @@ function getModelInstance(modelName: string): ChatGoogleGenerativeAI | ChatOpenA
 
       const config: any = {
         model: modelName,
-        temperature: 1.8,
-        maxTokens: 1024
       };
 
       // API Keyが設定されている場合のみ使用
@@ -185,6 +184,27 @@ function getModelInstance(modelName: string): ChatGoogleGenerativeAI | ChatOpenA
       }
 
       modelInstances[modelName] = new ChatOpenAI(config);
+    } else if (LLM_PROVIDER === 'anthropic') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      const baseURL = process.env.ANTHROPIC_BASE_URL;
+
+      const config: any = {
+        model: modelName,
+      };
+
+      // API Keyが設定されている場合のみ使用
+      if (apiKey) {
+        config.apiKey = apiKey;
+      }
+
+      // Base URLが設定されている場合のみ使用
+      if (baseURL) {
+        config.configuration = {
+          baseURL: baseURL
+        };
+      }
+
+      modelInstances[modelName] = new ChatAnthropic(config);
     } else {
       throw new Error(`Unsupported LLM_PROVIDER: ${LLM_PROVIDER}`);
     }
@@ -398,6 +418,9 @@ ${systemPrompt}`);
     } else if (LLM_PROVIDER === 'openai') {
       // OpenAI: vision, gpt-4o, gpt-4-turboなどは画像対応
       isImageInputSupported = /(vision|gpt-4o|gpt-4-turbo)/.test(modelName);
+    } else if (LLM_PROVIDER === 'anthropic') {
+      // Anthropic: claude-3以降のモデルは画像対応, Z.AI glm-4.5v以降のモデルも画像対応
+      isImageInputSupported = /claude-3/.test(modelName) || /^glm-(.*)v$/.test(modelName);
     }
     const inputMessages = messages;
     // imageはbase64データURL前提（Mastodon側で変換済み）
@@ -454,4 +477,4 @@ export async function clearConversation(conversationId: string): Promise<void> {
   if (messageHistories[conversationId]) {
     messageHistories[conversationId] = [];
   }
-} 
+}

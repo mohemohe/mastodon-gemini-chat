@@ -12,6 +12,7 @@
     "shell": "tsx src/shell.ts"
   },
   "dependencies": {
+    "@langchain/anthropic": "^1.0.0",
     "@langchain/community": "^1.0.2",
     "@langchain/google-genai": "^1.0.0",
     "@langchain/mcp-adapters": "^1.0.0",
