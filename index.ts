@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { connect, disconnect } from './src/mastodon';
+import { initializeMcp, cleanupMcp } from './src/mcp';
 
 console.log('Starting Mastodon Gemini Chat Bot...');
 
@@ -27,14 +28,37 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-connect();
+// MCP初期化を非同期で実行
+async function initializeApp() {
+  try {
+    // MCP初期化（オプション）
+    await initializeMcp();
+    console.log('MCP initialization completed');
+  } catch (error) {
+    console.warn('MCP initialization failed, continuing without MCP:', error);
+  }
+
+  // Mastodon接続
+  connect();
+}
+
+initializeApp();
 
 console.log('Bot is running. Press Ctrl+C to stop.');
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('Shutting down...');
   disconnect();
   console.log('Disconnected from Mastodon streaming API');
+
+  // MCPクリーンアップ
+  try {
+    await cleanupMcp();
+    console.log('MCP connections cleaned up');
+  } catch (error) {
+    console.error('Error during MCP cleanup:', error);
+  }
+
   process.exit(0);
 });
 

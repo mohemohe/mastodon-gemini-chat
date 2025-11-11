@@ -1,7 +1,7 @@
 import megalodon from 'megalodon';
 import type { MegalodonInterface, WebSocketInterface } from 'megalodon';
 import type { Entity } from 'megalodon/lib/src/entity';
-import { sendMessage } from './gemini';
+import { sendMessage } from './llm';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
@@ -264,4 +264,4 @@ async function fetchMyPastPosts(limit: number = 20): Promise<string> {
   }
 }
 
-export { connect, disconnect, fetchMyPastPosts }; 
+export { connect, disconnect, fetchMyPastPosts };

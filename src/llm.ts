@@ -1,10 +1,13 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ChatOpenAI } from '@langchain/openai';
 import type { BaseMessage } from '@langchain/core/messages';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { InMemoryChatMessageHistory } from '@langchain/core/chat_history';
-import fs from 'node:fs';
-import dotenv from 'dotenv';
+import { HumanMessage, AIMessage, SystemMessage } from '@langchain/core/messages';
+import { createAgent, tool } from 'langchain';
+import { InMemoryStore, type Runtime } from '@langchain/langgraph';
+import { MultiServerMCPClient } from '@langchain/mcp-adapters';
+import { initializeMcp, isMcpAvailable } from './mcp';
+import * as fs from 'node:fs';
+import * as dotenv from 'dotenv';
 dotenv.config();
 
 // LLMプロバイダーの設定（デフォルト: gemini）
@@ -88,13 +91,21 @@ console.log(`LLM Provider: ${LLM_PROVIDER}`);
 console.log(`Available models: ${MODEL_NAMES.join(', ')}`);
 console.log(`Using model: ${MODEL_NAMES[currentModelIndex]}`);
 
-const messageHistories: Record<string, InMemoryChatMessageHistory> = {};
+// v1でInMemoryChatMessageHistoryがなくなったため、シンプルな配列で管理
+const messageHistories: Record<string, BaseMessage[]> = {};
 
 const MAX_CONTEXT_LENGTH: number = Number.parseInt(process.env.MAX_CONTEXT_LENGTH || '10');
 
-function getMessageHistory(conversationId: string): InMemoryChatMessageHistory {
+// MCP関連の変数
+let mcpClient: MultiServerMCPClient | null = null;
+let agentWithTools: any = null;
+
+// ストアの初期化
+const store = new InMemoryStore();
+
+function getMessageHistory(conversationId: string): BaseMessage[] {
   if (!messageHistories[conversationId]) {
-    messageHistories[conversationId] = new InMemoryChatMessageHistory();
+    messageHistories[conversationId] = [];
   }
   return messageHistories[conversationId];
 }
@@ -203,6 +214,63 @@ function filterResponse(response: string): string {
   return response;
 }
 
+/**
+ * MCPクライアントとエージェントを初期化する
+ */
+async function initializeMcpAgent(): Promise<void> {
+  if (mcpClient !== null || agentWithTools !== null) {
+    return; // すでに初期化済み
+  }
+
+  try {
+    const mcpAdapter = await initializeMcp();
+    if (!mcpAdapter || !isMcpAvailable()) {
+      console.log('MCP is not available - using basic model');
+      return;
+    }
+
+    console.log('Initializing MCP client with tools...');
+
+    // 基本ツールを定義
+    const basicTools = [
+      tool(
+        async () => {
+          const now = new Date();
+          return now.toLocaleString('ja-JP', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        },
+        {
+          name: 'get_current_time',
+          description: 'Get the current date and time in Japanese format',
+        }
+      ),
+    ];
+
+    const modelName = getCurrentModelName();
+    const model = getModelInstance(modelName);
+
+    // 基本エージェントを作成
+    agentWithTools = createAgent({
+      model,
+      tools: basicTools,
+      store,
+    });
+
+    console.log('MCP agent initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize MCP agent:', error);
+    // MCPが利用できなくても基本機能は利用できるようにする
+    agentWithTools = null;
+  }
+}
+
 export async function sendMessage(
   systemPrompt: string,
   conversationId: string,
@@ -220,20 +288,89 @@ export async function sendMessage(
     if (!isMessageSafe(message)) {
       return ERROR_MESSAGE;
     }
+
+    // MCPエージェントを初期化（まだ初期化されていない場合）
+    if (agentWithTools === null) {
+      await initializeMcpAgent();
+    }
+
     updateModelUsage();
+
+    // MCPエージェントが利用可能な場合はエージェントを使用
+    if (agentWithTools !== null) {
+      try {
+        const formattedDate = getFormattedDateTime();
+        const fullSystemPrompt = `## 基本的な情報
+現在の日時は${formattedDate}です。
+タイムゾーンは${process.env.TZ || "JST"}です。
+日付を扱う場合はユーザーの言語を考慮してください（例: 日本語 -> JST, UTC+9, Asia/Tokyo）。
+使用しているAIのモデルは${getCurrentModelName()}です。
+${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。会話相手のユーザー名の先頭に「@」を付けないでください。` : ''}
+
+${systemPrompt}`;
+
+        // 履歴をメッセージ形式に変換
+        const messages: any[] = [];
+
+        // システムプロンプトを追加
+        messages.push({ role: 'user', content: fullSystemPrompt });
+        messages.push({ role: 'assistant', content: '了解しました。' });
+
+        // 履歴を追加
+        for (const item of history) {
+          if (item.role === 'user') {
+            messages.push({ role: 'user', content: item.content });
+          } else if (item.role === 'assistant' || item.role === 'model') {
+            messages.push({ role: 'assistant', content: item.content });
+          }
+        }
+
+        // 現在のメッセージを追加
+        if (message) {
+          messages.push({ role: 'user', content: message });
+        }
+
+        // エージェントを呼び出し
+        const result = await agentWithTools.invoke({
+          messages,
+        }, {
+          // userIdをコンテキストとして提供（将来的な個人化用）
+          context: { userId: conversationId },
+        });
+
+        const responseText = result.messages[result.messages.length - 1]?.content || '';
+        const filteredText = filterResponse(responseText);
+
+        // メッセージ履歴を更新
+        const messageHistory = getMessageHistory(conversationId);
+        if (message) {
+          messageHistory.push(new HumanMessage(message));
+        }
+        messageHistory.push(new AIMessage(filteredText));
+
+        return filteredText;
+
+      } catch (agentError) {
+        console.error('Agent execution failed, falling back to basic model:', agentError);
+        // エージェントが失敗した場合は基本モデルにフォールバック
+        agentWithTools = null;
+      }
+    }
+
+    // 基本モデルを使用（フォールバックまたはMCP未使用時）
     const messageHistory = getMessageHistory(conversationId);
     if (history.length > 0) {
       await clearConversation(conversationId);
       for (const item of history) {
         if (item.role === 'user') {
-          await messageHistory.addUserMessage(item.content);
+          messageHistory.push(new HumanMessage(item.content));
         } else if (item.role === 'assistant' || item.role === 'model') {
-          await messageHistory.addAIMessage(item.content);
+          messageHistory.push(new AIMessage(item.content));
         }
       }
     }
     if (message) {
-      await messageHistory.addUserMessage(message);
+      messageHistory.push(new HumanMessage(message));
     }
     const formattedDate = getFormattedDateTime();
     const systemMessage = new SystemMessage(`## 基本的な情報
@@ -244,7 +381,7 @@ export async function sendMessage(
 ${isMessageSafe(userName) ? `会話相手のユーザー名は「${userName}」です。会話相手のユーザー名の先頭に「@」を付けないでください。` : ''}
 
 ${systemPrompt}`);
-    let messages: BaseMessage[] = await messageHistory.getMessages();
+    let messages: BaseMessage[] = messageHistory;
     messages = [systemMessage, ...messages];
     if (messages.length > MAX_CONTEXT_LENGTH + 1) {
       const systemMessage = messages[0];
@@ -298,7 +435,7 @@ ${systemPrompt}`);
       }
     }
     const filteredText = filterResponse(text);
-    await messageHistory.addAIMessage(filteredText);
+    messageHistory.push(new AIMessage(filteredText));
     return filteredText;
   } catch (error) {
     const err = error as Error;
@@ -315,6 +452,6 @@ ${systemPrompt}`);
 
 export async function clearConversation(conversationId: string): Promise<void> {
   if (messageHistories[conversationId]) {
-    await messageHistories[conversationId].clear();
+    messageHistories[conversationId] = [];
   }
 } 

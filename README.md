@@ -49,7 +49,7 @@ cp .env.example .env
 ### 依存関係について
 
 このプロジェクトは以下の主要な依存関係を使用しています:
-- `@google/generative-ai`: Gemini APIとの通信
+- `@langchain/google-genai`: Gemini APIとの通信
 - `megalodon`: MastodonやMisskeyなど複数のプラットフォームに対応した統一クライアント
 - `dotenv`: 環境変数の管理
 - `node-fetch`: Node.js v18未満で使用されるfetch API互換ライブラリ
