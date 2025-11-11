@@ -1,13 +1,14 @@
 # Mastodon Gemini Chat Bot
 
-MastodonでGemini 2.0 Flashのチャット機能を利用できるボットです。メンションを送ると、Gemini AIが自然な会話で応答します。連続した会話も可能です。
+MastodonでGeminiのチャット機能を利用できるボットです。メンションを送ると、Gemini AIが自然な会話で応答します。連続した会話も可能です。  
+Geminiを冠していますがOpenAI互換エンドポイントやAnthropic互換エンドポイントも使用可能です。
 
-※ 人間注: このbotはCursorとClaude 3.7 Sonnetによって全てのコードが生成されています。
+※ 人間注: このbotはCursorとClaude Codeによって全てのコードが生成されています。
 
 ## 機能
 
 - megalodonライブラリを使用したMastodon APIクライアント
-- Gemini 2.0 Flash APIを使用した応答生成
+- Gemini, GPT, Claudeを使用した応答生成
 - 会話コンテキストの維持（連続した会話が可能）
 - 特定の形式のメンションをスキップする機能（`@username !` で始まるメンション）
 - 元の投稿の公開範囲（visibility）を引き継いだ返信
@@ -45,6 +46,8 @@ cp .env.example .env
 - `GEMINI_API_KEY`: Gemini APIキー
 - `GEMINI_MODEL`: 使用するGeminiモデル (デフォルト: gemini-2.0-flash)
 - `MAX_CONTEXT_LENGTH`: 保持する会話履歴の最大長さ (デフォルト: 10)
+
+OpenAI, Anthropicの場合は同様に対象の環境変数を設定してください。
 
 ### 依存関係について
 
