@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 services:
   mastodon-gemini-chat:
@@ -12,3 +12,4 @@ services:
       - ./index.js:/app/index.js
       - ./.env:/app/.env
       - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
