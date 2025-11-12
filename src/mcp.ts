@@ -1,16 +1,19 @@
-import { McpStdioServerAdapter } from '@langchain/mcp-adapters';
+import { MultiServerMCPClient } from '@langchain/mcp-adapters';
 import fs from 'node:fs';
 import path from 'node:path';
 
 export interface McpConfig {
   mcpServers: Record<string, {
-    command: string;
+    command?: string;
     args?: string[];
     env?: Record<string, string>;
+    transport?: string;
+    url?: string;
+    headers?: Record<string, string>;
   }>;
 }
 
-let mcpAdapter: McpStdioServerAdapter | null = null;
+let mcpClient: MultiServerMCPClient | null = null;
 let isInitialized = false;
 
 /**
@@ -41,74 +44,82 @@ function loadMcpConfig(): McpConfig | null {
 }
 
 /**
- * Initialize MCP adapter if configuration exists
+ * Initialize MCP client if configuration exists
  */
-export async function initializeMcp(): Promise<McpStdioServerAdapter | null> {
+export async function initializeMcp(): Promise<MultiServerMCPClient | null> {
   if (isInitialized) {
-    return mcpAdapter;
+    return mcpClient;
   }
-  
+
   const config = loadMcpConfig();
   if (!config) {
     isInitialized = true;
     return null;
   }
-  
+
   try {
-    console.log('Initializing MCP adapter...');
-    
-    // For now, initialize with the first configured server
-    // In a more complex implementation, you might want to support multiple servers
-    const serverNames = Object.keys(config.mcpServers);
-    const firstServerName = serverNames[0];
-    const serverConfig = config.mcpServers[firstServerName];
-    
-    console.log(`Connecting to MCP server: ${firstServerName}`);
-    
-    mcpAdapter = new McpStdioServerAdapter({
-      command: serverConfig.command,
-      args: serverConfig.args || [],
-      env: serverConfig.env || {},
-    });
-    
-    await mcpAdapter.connect();
-    console.log(`Successfully connected to MCP server: ${firstServerName}`);
-    
+    console.log('Initializing MCP client...');
+
+    // Transform config to match MultiServerMCPClient format
+    const serverConfigs: Record<string, any> = {
+      mcpServers: config.mcpServers,
+    };
+
+    console.log(`Connecting to ${Object.keys(serverConfigs).length} MCP servers`);
+
+    mcpClient = new MultiServerMCPClient(serverConfigs);
+
+    try {
+      // Initialize connections by getting tools
+      await mcpClient.getTools();
+      console.log('Successfully connected to MCP servers');
+    } catch (error) {
+      console.warn('Some MCP servers failed to connect, but client is available:', error);
+      // Don't fail completely - allow partial functionality
+    }
+
     isInitialized = true;
-    return mcpAdapter;
+    return mcpClient;
   } catch (error) {
-    console.error('Failed to initialize MCP adapter:', error);
-    mcpAdapter = null;
+    console.error('Failed to initialize MCP client:', error);
+    mcpClient = null;
     isInitialized = true;
     return null;
   }
 }
 
 /**
- * Get the initialized MCP adapter
+ * Get the initialized MCP client
  */
-export function getMcpAdapter(): McpStdioServerAdapter | null {
-  return mcpAdapter;
+export function getMcpClient(): MultiServerMCPClient | null {
+  return mcpClient;
+}
+
+/**
+ * Get the initialized MCP adapter (for backward compatibility)
+ */
+export function getMcpAdapter(): MultiServerMCPClient | null {
+  return mcpClient;
 }
 
 /**
  * Check if MCP is available and initialized
  */
 export function isMcpAvailable(): boolean {
-  return mcpAdapter !== null;
+  return mcpClient !== null;
 }
 
 /**
  * Cleanup MCP connections
  */
 export async function cleanupMcp(): Promise<void> {
-  if (mcpAdapter) {
+  if (mcpClient) {
     try {
-      await mcpAdapter.close();
-      console.log('MCP adapter disconnected');
+      await mcpClient.close();
+      console.log('MCP client disconnected');
     } catch (error) {
-      console.error('Error disconnecting MCP adapter:', error);
+      console.error('Error disconnecting MCP client:', error);
     }
-    mcpAdapter = null;
+    mcpClient = null;
   }
 }

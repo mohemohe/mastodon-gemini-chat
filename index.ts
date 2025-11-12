@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { connect, disconnect } from './src/mastodon';
-import { initializeMcp, cleanupMcp } from './src/mcp';
+import { cleanupMcp } from './src/mcp';
+import { initializeMcpOnStartup } from './src/llm';
 
 console.log('Starting Mastodon Gemini Chat Bot...');
 
@@ -28,15 +29,8 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-// MCP初期化を非同期で実行
 async function initializeApp() {
-  try {
-    // MCP初期化（オプション）
-    await initializeMcp();
-    console.log('MCP initialization completed');
-  } catch (error) {
-    console.warn('MCP initialization failed, continuing without MCP:', error);
-  }
+  await initializeMcpOnStartup();
 
   // Mastodon接続
   connect();
@@ -69,4 +63,4 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled rejection at:', promise, 'reason:', reason);
-}); 
+});

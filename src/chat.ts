@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { clearConversation } from './llm';
+import { fileURLToPath } from 'url';
 
-const DATA_DIR = path.resolve(__dirname, '../data');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname_esm = path.dirname(__filename);
+
+const DATA_DIR = path.resolve(__dirname_esm, '../data');
 const USERS_JSON_PATH = path.join(DATA_DIR, 'users.json');
 
 function ensureDataDir() {

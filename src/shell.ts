@@ -3,7 +3,7 @@
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sendMessage, clearConversation } from './llm';
+import { sendMessage, clearConversation , initializeMcpOnStartup } from './llm';
 import { setUserSystemPrompt, getUserSystemPrompt, isCommand, isChatCommand, handleChatCommand, readSystemPrompt, conversationContexts } from './chat';
 import { fetchMyPastPosts } from './mastodon';
 
@@ -93,4 +93,8 @@ function prompt(): void {
   });
 }
 
-prompt();
+async function main() {
+  await initializeMcpOnStartup();
+  prompt();
+}
+main();

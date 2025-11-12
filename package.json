@@ -4,7 +4,7 @@
   "description": "Mastodon bot that integrates with Gemini 2.0 Flash API",
   "main": "index.ts",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "start": "tsx index.ts",

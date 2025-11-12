@@ -243,13 +243,17 @@ async function initializeMcpAgent(): Promise<void> {
   }
 
   try {
-    const mcpAdapter = await initializeMcp();
-    if (!mcpAdapter || !isMcpAvailable()) {
+    const mcpClient = await initializeMcp();
+    if (!mcpClient || !isMcpAvailable()) {
       console.log('MCP is not available - using basic model');
       return;
     }
 
     console.log('Initializing MCP client with tools...');
+
+    // Get tools from MCP client
+    const mcpTools = await mcpClient.getTools();
+    console.log(`Loaded ${mcpTools.length} tools from MCP servers`);
 
     // 基本ツールを定義
     const basicTools = [
@@ -273,13 +277,16 @@ async function initializeMcpAgent(): Promise<void> {
       ),
     ];
 
+    // Combine basic tools with MCP tools
+    const allTools = [...basicTools, ...mcpTools];
+
     const modelName = getCurrentModelName();
     const model = getModelInstance(modelName);
 
-    // 基本エージェントを作成
+    // エージェントを作成（基本ツール + MCPツール）
     agentWithTools = createAgent({
       model,
-      tools: basicTools,
+      tools: allTools,
       store,
     });
 
@@ -309,10 +316,7 @@ export async function sendMessage(
       return ERROR_MESSAGE;
     }
 
-    // MCPエージェントを初期化（まだ初期化されていない場合）
-    if (agentWithTools === null) {
-      await initializeMcpAgent();
-    }
+    // MCPエージェントはアプリケーション起動時に初期化済み
 
     updateModelUsage();
 
@@ -476,5 +480,16 @@ ${systemPrompt}`);
 export async function clearConversation(conversationId: string): Promise<void> {
   if (messageHistories[conversationId]) {
     messageHistories[conversationId] = [];
+  }
+}
+
+export async function initializeMcpOnStartup() {
+  try {
+    console.log('Initializing MCP servers on application startup...');
+    await initializeMcpAgent();
+    console.log('MCP initialization completed');
+  } catch (error) {
+    console.error('Failed to initialize MCP on startup:', error);
+    // MCPが利用できなくても基本機能は継続
   }
 }
