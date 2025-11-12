@@ -11,6 +11,7 @@ RUN apk add --no-cache \
     docker \
     openssl \
     ca-certificates \
+    coreutils \
     && ln -sf python3 /usr/bin/python
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh

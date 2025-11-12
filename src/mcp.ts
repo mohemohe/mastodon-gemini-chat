@@ -60,12 +60,14 @@ export async function initializeMcp(): Promise<MultiServerMCPClient | null> {
   try {
     console.log('Initializing MCP client...');
 
+    console.log("config.mcpServers:", config.mcpServers);
+    
     // Transform config to match MultiServerMCPClient format
     const serverConfigs: Record<string, any> = {
       mcpServers: config.mcpServers,
     };
 
-    console.log(`Connecting to ${Object.keys(serverConfigs).length} MCP servers`);
+    console.log(`Connecting to ${Object.keys(serverConfigs.mcpServers).length} MCP servers`);
 
     mcpClient = new MultiServerMCPClient(serverConfigs);
 
