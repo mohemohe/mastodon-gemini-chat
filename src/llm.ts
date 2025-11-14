@@ -12,14 +12,26 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 // LLMプロバイダーの設定（デフォルト: gemini）
-const LLM_PROVIDER: string = process.env.LLM_PROVIDER || 'gemini';
+let LLM_PROVIDER: string = process.env.LLM_PROVIDER || 'gemini';
+const ORIGINAL_LLM_PROVIDER: string = LLM_PROVIDER;
+
+// フォールバックLLMプロバイダーの設定
+const FALLBACK_LLM_PROVIDER: string | undefined = process.env.FALLBACK_LLM_PROVIDER;
+let hasFallenBack = false;
+
+// 指定されたプロバイダーのモデル名を取得する関数
+function getModelNamesForProvider(provider: string): string[] {
+  if (provider === 'gemini') {
+    return (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim());
+  } else if (provider === 'anthropic') {
+    return (process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022,claude-3-5-haiku-20241022').split(',').map(model => model.trim());
+  } else {
+    return [(process.env.OPENAI_MODEL || 'gpt-4o-mini')];
+  }
+}
 
 // 環境変数からモデル名を取得（カンマ区切りで複数指定可能）
-const MODEL_NAMES: string[] = LLM_PROVIDER === 'gemini'
-  ? (process.env.GEMINI_MODEL || 'gemini-2.0-flash,gemini-2.0-flash-lite').split(',').map(model => model.trim())
-  : LLM_PROVIDER === 'anthropic'
-  ? (process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022,claude-3-5-haiku-20241022').split(',').map(model => model.trim())
-  : [(process.env.OPENAI_MODEL || 'gpt-4o-mini')];
+let MODEL_NAMES: string[] = getModelNamesForProvider(LLM_PROVIDER);
 let currentModelIndex = 0;
 
 // エラーメッセージを環境変数から取得
@@ -135,6 +147,42 @@ function switchToNextModel(): boolean {
   modelLastUsed.timestamp = Date.now();
   modelLastUsed.modelIndex = nextIndex;
   console.log(`Switching to model: ${MODEL_NAMES[currentModelIndex]}`);
+  return true;
+}
+
+function switchToFallbackProvider(): boolean {
+  // フォールバックプロバイダーが設定されていない場合は失敗
+  if (!FALLBACK_LLM_PROVIDER || FALLBACK_LLM_PROVIDER === '') {
+    console.log('No fallback provider configured');
+    return false;
+  }
+
+  // すでにフォールバックした場合は失敗（1度だけフォールバック）
+  if (hasFallenBack) {
+    console.log('Already fallen back to fallback provider');
+    return false;
+  }
+
+  // フォールバックプロバイダーが現在のプロバイダーと同じ場合は失敗
+  if (FALLBACK_LLM_PROVIDER === LLM_PROVIDER) {
+    console.log('Fallback provider is the same as current provider');
+    return false;
+  }
+
+  console.log(`Switching from ${LLM_PROVIDER} to fallback provider: ${FALLBACK_LLM_PROVIDER}`);
+
+  // プロバイダーを切り替え
+  LLM_PROVIDER = FALLBACK_LLM_PROVIDER;
+  MODEL_NAMES = getModelNamesForProvider(LLM_PROVIDER);
+  currentModelIndex = 0;
+  modelLastUsed.timestamp = Date.now();
+  modelLastUsed.modelIndex = 0;
+  hasFallenBack = true;
+
+  console.log(`Switched to fallback provider: ${LLM_PROVIDER}`);
+  console.log(`Available models: ${MODEL_NAMES.join(', ')}`);
+  console.log(`Using model: ${MODEL_NAMES[currentModelIndex]}`);
+
   return true;
 }
 
@@ -456,6 +504,8 @@ ${systemPrompt}`);
           console.log('Rate limit or critical error detected, attempting to switch models...');
           if (switchToNextModel()) {
             return sendMessage(systemPrompt, conversationId, userName, message, history, image, recursiveCount + 1);
+          } else if (switchToFallbackProvider()) {
+            return sendMessage(systemPrompt, conversationId, userName, message, history, image, recursiveCount + 1);
           }
           if (i === 2) break;
         }
@@ -470,6 +520,8 @@ ${systemPrompt}`);
     if (isRateLimitError(err) || isNotFoundError(err)) {
       console.log('Rate limit detected, attempting to switch models...');
       if (switchToNextModel()) {
+        return sendMessage(systemPrompt, conversationId, userName, message, history, image, recursiveCount + 1);
+      } else if (switchToFallbackProvider()) {
         return sendMessage(systemPrompt, conversationId, userName, message, history, image, recursiveCount + 1);
       }
     }
